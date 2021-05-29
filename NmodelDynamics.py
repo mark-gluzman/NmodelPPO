@@ -181,3 +181,45 @@ class ProcessingNetwork:
         prod_for_actions_list.append(prod_for_actions2)
         return prod_for_actions_list
 
+
+    def next_state_list(self):
+        """
+        :return:
+        list: Python dictionary s.t. keys are ( state > 0, action, activity), values are jobs transitions
+        list_next_states: set of all possible jobs transitions
+        """
+        list = {}
+        s_D = np.shape(self.D)
+
+
+        adjoint_buffers = {} # Python dictionary: key is a buffer, value is a list of buffers associated to the same station
+        for i in range(0, s_D[0]):
+            for j in range(0, s_D[1]):
+                if self.D[i][j] ==1:
+                    d = copy.copy(self.D[i])  # TODO: np.copy?
+                    d[j] = 0
+                    adjoint_buffers[j] = copy.copy(d)
+        self.adjoint_buffers = adjoint_buffers
+
+        for a in [False, True]:#self.actions:  # indicator that activity 'w' is legitimate
+            for s in itertools.product([0, 1], repeat=self.buffers_num):  # combination of non-empty, empty buffers
+                for w in range(0, int(np.sum(self.alpha>0)+np.sum(self.mu[1:]>0))):  # activity
+
+                        ar = np.asarray(s, 'int8')
+                        if w < np.sum(self.alpha>0):  # arrival activity
+                            el = np.nonzero(self.alpha)[0][w]
+                            arriving = np.zeros(self.buffers_num, 'int8')
+                            arriving[el] = 1
+                            list[(tuple(ar), a, w)] = arriving
+                        elif ar[w - np.sum(self.alpha>0)]>0 and \
+                                (a or np.sum(np.dot(ar, adjoint_buffers[w - np.sum(self.alpha>0)]))==0):# service activity is possible
+                            list[(tuple(ar), a, w)] = self.A[w - np.sum(self.alpha>0)]
+
+                        else:  # service activity is not possible. Fake transition
+                            list[(tuple(ar), a, w)] = np.zeros(self.buffers_num, 'int8')
+
+
+        list_next_states = np.asarray([ list[(tuple(np.ones(self.buffers_num)), 1, w)]
+                                        for w in range(0, int(np.sum(self.alpha>0)+np.sum(self.mu[1:]>0)))])
+        return list_next_states#, list
+

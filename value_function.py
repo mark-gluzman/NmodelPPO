@@ -32,7 +32,7 @@ class NNValueFunction(object):
         """
         history = self.model1.fit(x=x, y=y, batch_size=self.batch_size, epochs=self.epochs,
                                   workers=6, use_multiprocessing=True)
-        logger.log({'ValFuncLoss': history.history('loss')})
+        logger.log({'ValFuncLoss': history.history['loss'][-1]})
 
 
     def predict(self, x):
