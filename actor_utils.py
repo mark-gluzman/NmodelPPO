@@ -27,7 +27,7 @@ class PolicyNN(tf.keras.Model):
         # https://stackoverflow.com/questions/60106829/cannot-build-custom-keras-model-with-custom-loss/60986815#60986815
         self.call(np.array([[0, 0]]))
 
-    def call(self, input_data, step_type=(), network_state=(), training=False):
+    def call(self, input_data, step_type=(), network_state=()):
         x1 = self.hid1(input_data)
         x2 = self.hid2(x1)
         x3 = self.hid3(x2)
@@ -40,7 +40,6 @@ class Policy(object):
         self.nn = PolicyNN(obs_dim, act_dim, kl_targ, hid1_mult)
 
         self.lr = lr_p
-        self.lr_multiplier=1.
         self.clipping_range = clipping_range
         self.epochs = ep_p
         self.batch_size = bs_p
@@ -64,30 +63,38 @@ class Policy(object):
         old_probs = self.nn(np.array(states)).numpy()
         bat_per_epoch = int(len(states) / self.batch_size)
         policy_loss = 0
+        a_opt = tf.keras.optimizers.Adam(learning_rate=self.lr)
         for epoch in range(self.epochs):
             states, actions, adv, old_probs = shuffle(states, actions, adv, old_probs)
             policy_loss = 0
             for i in range(bat_per_epoch):
                 n = i * self.batch_size
                 policy_loss += self.batch_step(states[n:n + self.batch_size], actions[n:n + self.batch_size],
-                                 adv[n:n + self.batch_size], old_probs[n:n + self.batch_size]).numpy()
+                                 adv[n:n + self.batch_size], old_probs[n:n + self.batch_size], optimizer=a_opt).numpy()
 
             print('Policy NN learning epoch #', epoch, ' Loss = ', policy_loss)
 
+        probs = self.nn(np.array(states))
+        entropy = tf.reduce_mean(tf.math.negative(tf.math.multiply(probs, tf.math.log(probs))))
+        kl = tf.reduce_mean(tf.math.multiply(probs, tf.math.log(tf.math.divide(probs, old_probs))))
+        act_probs = tf.reduce_sum(probs * tf.one_hot(indices=actions.astype('int32').flatten(), depth=probs.shape[1]),
+                                  axis=1)
+        act_probs_old = tf.reduce_sum(
+            old_probs * tf.one_hot(indices=actions.astype('int32').flatten(), depth=probs.shape[1]), axis=1)
+
+        ratios = tf.math.exp(tf.math.log(act_probs) - tf.math.log(act_probs_old))
+
 
         logger.log({'PolicyLoss': policy_loss,
-                  #'Clipping': clipping_range,
-                  #'Max ratio': max(ratios),
-                  #'Min ratio': min(ratios),
-                  #'Mean ratio': np.mean(ratios),
-                  #'PolicyEntropy': entropy,
-                  #'KL': kl,
-                  #'Beta': self.beta,
-                  #'_lr_multiplier': self.lr_multiplier}
-                    })
+                  'Clipping': self.clipping_range,
+                  'Max ratio': np.max(ratios),
+                  'Min ratio': np.min(ratios),
+                  'Mean ratio': np.mean(ratios),
+                  'PolicyEntropy': entropy.numpy(),
+                  'KL': kl.numpy(),
+                  'lr': self.lr})
 
-
-    def batch_step(self, states, actions, adv, old_probs):
+    def batch_step(self, states, actions, adv, old_probs, optimizer):
 
         with tf.GradientTape() as tape:
             # Make prediction
@@ -97,8 +104,7 @@ class Policy(object):
         # Calculate gradients
         grads = tape.gradient(loss, self.nn.trainable_variables)
         # Update model
-        a_opt = tf.keras.optimizers.Adam(learning_rate=self.lr*self.lr_multiplier)
-        a_opt.apply_gradients(zip(grads, self.nn.trainable_variables))
+        optimizer.apply_gradients(zip(grads, self.nn.trainable_variables))
 
         return loss
 
@@ -113,9 +119,10 @@ class Policy(object):
         :param obs: state
         :return: if stochastic=True returns pi(a|x), else returns distribution with prob=1 on argmax[ pi(a|x) ]
         """
+        obs = np.array(obs, dtype = 'float32')
         if obs.ndim == 1:
             obs = tf.expand_dims(obs, axis=0)
-        pr = self.nn(obs)
+        pr = self.nn(obs).numpy()
 
         if stochastic:
             return pr
@@ -166,7 +173,7 @@ class Policy(object):
             ###### compute action distribution according to Policy Neural Network for state###
             if tuple(state) not in policy_buffer:
                 act_distr = self.sample(state_input)
-                policy_buffer[tuple(state)] = act_distr.numpy()
+                policy_buffer[tuple(state)] = act_distr
             distr = policy_buffer[tuple(state)][0] # distribution for each station
             distr = distr / np.sum(distr)
             ############################################
@@ -240,7 +247,7 @@ class Policy(object):
             ###### compute action distribution according to Policy Neural Network for state###
             if tuple(state) not in policy_buffer:
                 act_distr = self.sample(state_input)
-                policy_buffer[tuple(state)] = act_distr.numpy()
+                policy_buffer[tuple(state)] = act_distr
             distr = policy_buffer[tuple(state)][0] # distribution for each station
             distr = distr / np.sum(distr)
             ############################################

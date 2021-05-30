@@ -26,8 +26,8 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
     scale, offset = scaler.get()
 
     '''
-    initial_states_set = random.sample(scaler.initial_states, k=episodes)
-    trajectory, total_steps = policy.run_episode(network, scaler, time_steps,  skipping_steps,  initial_states_set[0])
+    initial_states_set = random.sample(scaler.initial_states, k=no_episodes)
+    trajectory, total_steps = policy.run_episode(network, scaler, time_steps,  initial_states_set[0])
     trajectories = []
     trajectories.append(trajectory)
     '''
@@ -36,7 +36,7 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
 
 
     simulators = [remote_network.remote(policy.nn.obs_dim, policy.nn.act_dim, policy.nn.kl_targ, policy.nn.hid1_mult,
-                                        policy.ep_p, policy.bs_p, policy.lr_p, policy.clipping_range)
+                                        policy.epochs, policy.batch_size, policy.lr, policy.clipping_range)
                   for _ in range(MAX_ACTORS)]
 
     actors_per_run = no_episodes // MAX_ACTORS  # do not run more parallel processes than number of cores
@@ -48,7 +48,7 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
 
     ######### save neural network parameters to file ###########
     file_weights = os.path.join(logger.path_weights, 'weights_' + str(policy_iter_num) + '.npy')
-    np.save(file_weights, weights)
+    np.save(file_weights, np.array(weights, dtype = object))
     ##################
 
     initial_states_set = random.sample(scaler.initial_states, k=no_episodes)  # sample initial states for episodes
@@ -112,7 +112,7 @@ def run_weights(network, weights_set, policy, scaler, time_steps):
     remote_network = ray.remote(Policy)
 
     simulators = [remote_network.remote(policy.nn.obs_dim, policy.nn.act_dim, policy.nn.kl_targ, policy.nn.hid1_mult,
-                                        policy.ep_p, policy.bs_p, policy.lr_p, policy.clipping_range)
+                                        policy.epochs, policy.batch_size, policy.lr, policy.clipping_range)
                   for _ in range(episodes)]
 
     res = []

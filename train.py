@@ -51,13 +51,6 @@ def add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteratio
             ###### compute expectation of the value function of the next state ###########
             probab_of_actions = policy.sample(observes) # probability of choosing actions according to a NN policy
 
-            distr = np.array(probab_of_actions[0].T)
-            for ar_i in range(1, network.stations_num):
-                distr = [a * b for a in distr for b in np.array(probab_of_actions[ar_i].T)]
-
-            distr = np.array(distr).T
-            distr = distr / np.sum(distr, axis=1)[:, np.newaxis]  # normalization
-
             action_array = network.next_state_probN(unscaled_obs) # transition probabilities for fixed actions
 
             # expectation of the value function for fixed actions
@@ -66,16 +59,14 @@ def add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteratio
                 value_for_each_action_list.append(diag_dot(act, trajectory['values_set'].T))
             value_for_each_action = np.vstack(value_for_each_action_list)
 
-            P_pi = diag_dot(distr, value_for_each_action)  # expectation of the value function
+            P_pi = diag_dot(probab_of_actions, value_for_each_action)  # expectation of the value function
             ##############################################################################################################
 
             # td-error computing
             tds_pi = trajectory['rewards'] - values + gamma*P_pi[:, np.newaxis]#gamma * np.append(values[1:], values[-1]), axis=0)#
 
             # value function computing for futher neural network training
-            #TODO: ensure that gamma<1 works
             disc_sum_rew = discount(x=tds_pi,   gamma= lam*gamma, v_last = tds_pi[-1]) + values
-
         else:
             disc_sum_rew = discount(x=trajectory['rewards'],   gamma= gamma, v_last = trajectory['rewards'][-1])
 
@@ -165,19 +156,13 @@ def build_train_set(trajectories, gamma, scaler):
 
 
         ###### compute expectation of the value function of the next state ###########
-
-
         action_array = network.next_state_probN(unscaled_obs) # transition probabilities for fixed actions
-
-
 
         # expectation of the value function for fixed actions
         value_for_each_action_list = []
         for act in action_array:
             value_for_each_action_list.append(diag_dot(act, trajectory['values_set'].T))
         value_for_each_action = np.vstack(value_for_each_action_list)
-
-
         ##############################################################################################################
 
         # # expectation of the value function w.r.t the actual actions in data
@@ -281,16 +266,15 @@ def main(network, num_policy_iterations, no_of_actors, episode_duration, no_arri
         iteration += 1
         alpha = 1. - iteration / num_policy_iterations
         policy.clipping_range = max(0.01, alpha*clipping_parameter)
-        policy.lr_multiplier = max(0.05, alpha)
-
-        # save policy NN parameters eacg 10th iteration
+        policy.lr = max(0.05, alpha)*lr_p
+        # save policy NN parameters each 10th iteration
         if iteration % 10 == 1:
             weights_set.append(policy.get_weights())
             scaler_set.append(copy.copy(scaler))
 
-        # simulate trajectoires / generate datapoints
+        # simulate trajectories
         trajectories = run_policy(network, policy, scaler, logger, gamma, iteration,
-                                      no_episodes=no_of_actors, time_steps=episode_duration) #simulation
+                                      no_episodes=no_of_actors, time_steps=episode_duration)  #simulation
         # add estimated values to episodes
         add_value(trajectories, val_func, scaler, network.next_state_list())
         # calculate values from data

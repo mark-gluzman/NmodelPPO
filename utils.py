@@ -65,7 +65,7 @@ class Scaler(object):
 
     def get(self):
         """ returns 2-tuple: (scale, offset) """
-        return 1/(np.sqrt(self.vars) + 0.1)/3, self.means
+        return  1/(np.sqrt(self.vars) + 0.1)/3, self.means
 
 
 class Logger(object):
@@ -119,7 +119,7 @@ class Logger(object):
         """Print metrics to stdout"""
         log_keys = [k for k in log.keys()]
         log_keys.sort()
-        print('***** Episode {}, Average Cost = {:.1f} *****'.format(log['_Episode'],
+        print('***** Iteration {}, Average Cost = {:.1f} *****'.format(log['_Episode'],
                                                                log['_AverageReward']))
         for key in log_keys:
             if key[0] != '_':  # don't display log items with leading '_'
