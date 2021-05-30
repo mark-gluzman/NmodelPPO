@@ -3,17 +3,17 @@ import numpy as np
 
 class NNValueFunction(object):
     """ NN-based state-value function """
-    def __init__(self, obs_dim, hid1_mult):
+    def __init__(self, obs_dim, hid1_mult, ep_v, bs_v, lr_v):
 
         self.obs_dim = obs_dim
         self.hid1_mult = hid1_mult
-        self.epochs = 3
-        self.lr = 2.5 * 10**(-4)
+        self.epochs = ep_v
+        self.lr = lr_v
         self.hid3_size = 10
-        self.batch_size = 2048
+        self.batch_size = bs_v
 
         self.model1 = tf.keras.Sequential()
-        hid1_size = self.obs_dim * self.hid1_mult  # default multipler 10 chosen empirically on 'Hopper-v1'
+        hid1_size = self.obs_dim * self.hid1_mult
         hid3_size = self.hid3_size  # chosen empirically
         hid2_size = int(np.sqrt(hid1_size * hid3_size))
         self.model1.add(tf.keras.layers.Dense(hid1_size, input_shape=(self.obs_dim,), activation='relu'))
@@ -30,8 +30,7 @@ class NNValueFunction(object):
             y: target
             logger: logger to save training loss and % explained variance
         """
-        history = self.model1.fit(x=x, y=y, batch_size=self.batch_size, epochs=self.epochs,
-                                  workers=6, use_multiprocessing=True)
+        history = self.model1.fit(x=x, y=y, batch_size=self.batch_size, epochs=self.epochs)
         logger.log({'ValFuncLoss': history.history['loss'][-1]})
 
 

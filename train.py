@@ -20,166 +20,13 @@ import random
 import datetime
 import copy
 
+from simulation import run_policy, run_weights
 
 ray.init()
-
-MAX_ACTORS = 2  # max number of parallel simulations
-
 
 def diag_dot(A, B):
     # returns np.diag(np.dot(A, B))
     return np.einsum("ij,ji->i", A, B)
-
-
-def run_weights(network_id, weights_set, policy, scaler, time_steps):
-
-    if scaler.initial_states_procedure == 'previous_iteration':
-        initial_state_0 = np.zeros(policy.get_obs_dim() + 1)
-    else:
-        initial_state_0 = np.zeros(policy.get_obs_dim())
-
-    episodes = len(weights_set)
-
-    remote_network = ray.remote(Policy)
-
-    simulators = [remote_network.remote(policy.get_obs_dim(), policy.get_act_dim(), policy.get_kl_targ(),
-                                        policy.get_hid1_mult()) for _ in range(episodes)]
-
-    res = []
-
-    ray.get([s.set_weights.remote(weights_set[i]) for i, s in enumerate(simulators)])
-
-    scaler_id = ray.put(scaler)
-
-    res.extend(ray.get([simulators[i].policy_performance.remote(network_id, scaler_id, time_steps, initial_state_0, i)
-                      for i in range(episodes)]))
-
-    print('simulation is done')
-
-
-    average_cost_set = np.zeros(episodes)
-    ci_set = np.zeros(episodes)
-
-
-    for i in range(episodes):
-
-        average_cost_set[res[i][1]] = res[i][0]
-        ci_set[res[i][1]] = res[i][2]
-
-    print('Average cost: ', average_cost_set)
-    print('CI: ', ci_set)
-    return average_cost_set, ci_set
-
-
-
-def run_policy(network, policy, scaler, logger, gamma,
-               policy_iter_num, skipping_steps, episodes, time_steps, iteration):
-    """
-    Run given policy and collect data
-    :param network_id: queuing network structure and first-order info
-    :param policy: queuing network policy
-    :param scaler: normalization values
-    :param logger: metadata accumulator
-    :param gamma: discount factor
-    :param policy_iter_num: policy iteration
-    :param skipping_steps: number of steps when action does not change  ("frame-skipping" technique)
-    :param episodes: number of parallel simulations (episodes)
-    :param time_steps: max time steps in an episode
-    :return: trajectories = (states, actions, rewards)
-    """
-
-    total_steps = 0
-    #action_optimal_sum = 0
-    #total_zero_steps = 0
-
-    burn = 1
-
-    scale, offset = scaler.get()
-
-    '''
-    initial_states_set = random.sample(scaler.initial_states, k=episodes)
-    trajectory, total_steps = policy.run_episode(network, scaler, time_steps,  skipping_steps,  initial_states_set[0])
-    trajectories = []
-    trajectories.append(trajectory)
-    '''
-    #### declare actors for distributed simulations of a current policy#####
-    remote_network = ray.remote(Policy)
-    simulators = [remote_network.remote(policy.nn.obs_dim, policy.nn.act_dim, policy.nn.kl_targ, policy.nn.hid1_mult)
-                  for _ in range(MAX_ACTORS)]
-
-    actors_per_run = episodes // MAX_ACTORS # do not run more parallel processes than number of cores
-    remainder = episodes - actors_per_run * MAX_ACTORS
-    weights = policy.get_weights()  # get neural network parameters
-    for s in simulators: # assign the neural network weights to all actors
-        s.set_weights.remote(weights)
-    ######################################################
-
-
-
-    ######### save neural network parameters to file ###########
-    file_weights = os.path.join(logger.path_weights, 'weights_'+str(policy_iter_num)+'.npy')
-    np.save(file_weights, weights)
-    ##################
-
-    scaler_id = ray.put(scaler)
-    initial_states_set = random.sample(scaler.initial_states, k=episodes)  # sample initial states for episodes
-
-    ######### policy simulation ########################
-    accum_res = []  # results accumulator from all actors
-    trajectories = []  # list of trajectories
-    for j in range(actors_per_run):
-        accum_res.extend(ray.get([simulators[i].run_episode.remote(network, scaler_id, time_steps,
-                                skipping_steps,  initial_states_set[j*MAX_ACTORS+i]) for i in range(MAX_ACTORS)]))
-    if remainder>0:
-        accum_res.extend(ray.get([simulators[i].run_episode.remote(network, scaler_id, time_steps,
-                                skipping_steps, initial_states_set[actors_per_run*MAX_ACTORS+i]) for i in range(remainder)]))
-    print('simulation is done')
-
-    for i in range(len(accum_res)):
-        trajectories.append(accum_res[i][0])
-        total_steps += accum_res[i][1]  # total time-steps
-         
-    #################################################
-
-
-    #optimal_ratio = action_optimal_sum / (total_steps * skipping_steps)  # fraction of actions that are optimal
-    # fraction of actions that are optimal excluding transitions when all actions are optimal
-    #pure_optimal_ratio = (action_optimal_sum - total_zero_steps)/ (total_steps * skipping_steps - total_zero_steps)
-
-    average_reward = np.mean([t['rewards'] for t in trajectories])
-
-
-    #### normalization of the states in data ####################
-    unscaled = np.concatenate([t['unscaled_obs'][:-burn] for t in trajectories])
-    if gamma < 1.0:
-        for t in trajectories:
-            t['observes'] = (t['unscaled_obs'] - offset[:-1]) * scale[:-1]
-
-
-    else:
-        for t in trajectories:
-            t['observes'] = (t['unscaled_obs'] - offset[:-1]) * scale[:-1]
-            z = t['rewards'] - average_reward
-            t['rewards'] = z
-    ##################################################################
-
-
-
-
-
-    scaler.update_initial(np.hstack((unscaled, np.zeros(len(unscaled))[np.newaxis].T)))
-
-    ########## results report ##########################
-    print('Average cost: ',  -average_reward)
-
-    logger.log({'_AverageReward': -average_reward,
-                'Steps': total_steps,
-                #'Zero steps':total_zero_steps,
-                #'% of optimal actions': int(optimal_ratio * 1000) / 10.,
-                #'% of pure optimal actions': int(pure_optimal_ratio * 1000) / 10.,
-    })
-    ####################################################
-    return trajectories
 
 def add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteration):
     """
@@ -213,8 +60,6 @@ def add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteratio
 
             action_array = network.next_state_probN(unscaled_obs) # transition probabilities for fixed actions
 
-
-
             # expectation of the value function for fixed actions
             value_for_each_action_list = []
             for act in action_array:
@@ -224,39 +69,16 @@ def add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteratio
             P_pi = diag_dot(distr, value_for_each_action)  # expectation of the value function
             ##############################################################################################################
 
-            # # expectation of the value function w.r.t the actual actions in data
-            # distr_fir = np.eye(len(network.actions))[trajectory['actions_glob']]
-            #
-            # P_a = diag_dot(distr_fir, value_for_each_action)
-
-
             # td-error computing
             tds_pi = trajectory['rewards'] - values + gamma*P_pi[:, np.newaxis]#gamma * np.append(values[1:], values[-1]), axis=0)#
-            # tds_a = trajectory['rewards'] - values +gamma*P_a[:, np.newaxis]# gamma * np.append(values[1:], values[-1]), axis=0)  #
-
-
-
 
             # value function computing for futher neural network training
             #TODO: ensure that gamma<1 works
-            if gamma < 1:
-                #advantages = discount(x=tds_pi,   gamma=lam*gamma, v_last = tds_pi[-1]) - tds_pi + tds_a   # advantage function
-                disc_sum_rew = discount(x=tds_pi,   gamma= lam*gamma, v_last = tds_pi[-1]) + values
-            else:
-                #advantages = relarive_af(unscaled_obs, td_pi=tds_pi, td_act=tds_a, lam=lam)  # advantage function
-                disc_sum_rew = relarive_af(unscaled_obs, td_pi=tds_pi, lam=1) + values # advantage function
+            disc_sum_rew = discount(x=tds_pi,   gamma= lam*gamma, v_last = tds_pi[-1]) + values
 
         else:
-            if gamma < 1:
-                #advantages = discount(x=tds_pi,   gamma=lam*gamma, v_last = tds_pi[-1]) - tds_pi + tds_a   # advantage function
-                disc_sum_rew = discount(x=trajectory['rewards'],   gamma= gamma, v_last = trajectory['rewards'][-1])
-            else:
+            disc_sum_rew = discount(x=trajectory['rewards'],   gamma= gamma, v_last = trajectory['rewards'][-1])
 
-                #advantages = relarive_af(unscaled_obs, td_pi=tds_pi, td_act=tds_a, lam=lam)  # advantage function
-                disc_sum_rew = relarive_af(trajectory['unscaled_obs'], td_pi=trajectory['rewards'], lam=1)  # advantage function
-
-
-        #trajectory['advantages'] = np.asarray(advantages)
         trajectory['disc_sum_rew'] = disc_sum_rew
 
 
@@ -264,7 +86,7 @@ def add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteratio
     time_policy = end_time - start_time
     print('add_disc_sum_rew time:', int((time_policy.total_seconds() / 60) * 100) / 100., 'minutes')
 
-    burn = 1
+    burn = 1 # cut the last 'burn' points of the generated trajectories
 
     unscaled_obs = np.concatenate([t['unscaled_obs'][:-burn] for t in trajectories])
     disc_sum_rew = np.concatenate([t['disc_sum_rew'][:-burn] for t in trajectories])
@@ -288,21 +110,6 @@ def discount(x, gamma, v_last):
             disc_array[i] = x[i] + gamma * disc_array[i + 1]
 
     return disc_array
-
-
-def relarive_af(unscaled_obs, td_pi,  lam):
-    # return advantage function
-    disc_array = np.copy(td_pi)
-    sum_tds = 0
-    for i in range(len(td_pi) - 2, -1, -1):
-        if np.sum(unscaled_obs[i+1]) != 0:
-            sum_tds = td_pi[i+1] + lam * sum_tds
-        else:
-            sum_tds = 0
-        disc_array[i] += sum_tds
-
-    return disc_array
-
 
 
 def add_value(trajectories, val_func, scaler, possible_states):
@@ -351,8 +158,6 @@ def build_train_set(trajectories, gamma, scaler):
     :return: data for further Policy and Value neural networks training
     """
 
-
-
     for trajectory in trajectories:
         values = trajectory['values']
 
@@ -381,11 +186,7 @@ def build_train_set(trajectories, gamma, scaler):
         P_a = diag_dot(distr_fir, value_for_each_action)
 
         advantages = trajectory['rewards'] - values +gamma*P_a[:, np.newaxis]# gamma * np.append(values[1:], values[-1]), axis=0)  #
-
-
         trajectory['advantages'] = np.asarray(advantages)
-
-
 
 
     start_time = datetime.datetime.now()
@@ -449,13 +250,12 @@ def log_batch_stats(observes, actions, advantages, disc_sum_rew, logger, episode
                 })
 
 # TODO: check shadow name
-def main(network, num_policy_iterations, gamma, lam, kl_targ, batch_size, hid1_mult, episode_duration,
-         clipping_parameter, skipping_steps, initial_state_procedure):
+def main(network, num_policy_iterations, no_of_actors, episode_duration, no_arrivals, gamma, lam, clipping_parameter,
+         ep_v, bs_v, lr_v, ep_p, bs_p, lr_p, kl_targ, hid1_mult):
     """
     # Main training loop
     :param: see ArgumentParser below
     """
-
 
     obs_dim = network.buffers_num
     act_dim = network.action_size_per_buffer
@@ -464,32 +264,14 @@ def main(network, num_policy_iterations, gamma, lam, kl_targ, batch_size, hid1_m
     logger = Logger(logname=network.network_name, now=now, time_start=time_start)
 
 
-    scaler = Scaler(obs_dim + 1, initial_state_procedure)
-    val_func = NNValueFunction(obs_dim, hid1_mult) # Value Neural Network initialization
-    policy = Policy(obs_dim, act_dim, kl_targ, hid1_mult) # Policy Neural Network initialization
-
-
-
+    scaler = Scaler(obs_dim + 1)
+    val_func = NNValueFunction(obs_dim, hid1_mult, ep_v, bs_v, lr_v) # Value Neural Network initialization
+    policy = Policy(obs_dim, act_dim, kl_targ, hid1_mult, ep_p, bs_p, lr_p, clipping_parameter) # Policy Neural Network initialization
 
 
     ############## creating set of initial states for episodes in simulations##########################
-    if initial_state_procedure=='empty':
-        x = np.zeros((50000, obs_dim), dtype= 'int8')
-        scaler.update_initial(x)
-    elif initial_state_procedure=='load':
-        x = np.load('x.npy')
-        scaler.update_initial(x.T)
-    elif initial_state_procedure!='previous_iteration':
-        policy_init = network.policy_list(initial_state_procedure)
-        x = network.simulate_episode(np.zeros(obs_dim, 'int8'), policy_init)
-        scaler.update_initial(x)
-    else:
-        run_policy(network, policy, scaler, logger, gamma, 0, skipping_steps,   episodes=1, time_steps=episode_duration, iteration=0)
+    run_policy(network, policy, scaler, logger, gamma, policy_iter_num=0, no_episodes=1, time_steps=episode_duration)
     ###########################################################################
-
-
-
-
 
     iteration = 0  # count of policy iterations
     weights_set = []
@@ -501,34 +283,32 @@ def main(network, num_policy_iterations, gamma, lam, kl_targ, batch_size, hid1_m
         policy.clipping_range = max(0.01, alpha*clipping_parameter)
         policy.lr_multiplier = max(0.05, alpha)
 
-        print('Clipping range is ', policy.clipping_range)
-
+        # save policy NN parameters eacg 10th iteration
         if iteration % 10 == 1:
             weights_set.append(policy.get_weights())
             scaler_set.append(copy.copy(scaler))
 
-        trajectories = run_policy(network, policy, scaler, logger, gamma, iteration, skipping_steps,
-                                      episodes=batch_size, time_steps=episode_duration, iteration=iteration) #simulation
-
-        add_value(trajectories, val_func, scaler, network.next_state_list())  # add estimated values to episodes
-        observes, disc_sum_rew_norm = add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteration)  # calculate values from data
-
-        val_func.fit(observes, disc_sum_rew_norm, logger)  # update value function
-        add_value(trajectories, val_func, scaler, network.next_state_list())  # add estimated values to episodes
+        # simulate trajectoires / generate datapoints
+        trajectories = run_policy(network, policy, scaler, logger, gamma, iteration,
+                                      no_episodes=no_of_actors, time_steps=episode_duration) #simulation
+        # add estimated values to episodes
+        add_value(trajectories, val_func, scaler, network.next_state_list())
+        # calculate values from data
+        observes, disc_sum_rew_norm = add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteration)
+        # update value function
+        val_func.fit(observes, disc_sum_rew_norm, logger)
+        # add estimated values to episodes
+        add_value(trajectories, val_func, scaler, network.next_state_list())
+        # compute advantage function estimates
         observes, actions, advantages, disc_sum_rew = build_train_set(trajectories, gamma, scaler)
-
-
-        #scale, offset = scaler.get()
         log_batch_stats(observes, actions, advantages, disc_sum_rew, logger, iteration)  # add various stats
+
         policy.update(observes, actions, np.squeeze(advantages), logger)  # update policy
-
-
-        #print('V(0):', disc_sum_rew[0], val_func.predict([observes[0]])[0][0]/ scale[-1] + offset[-1])
 
         logger.write(display=True)  # write logger results to file and stdout
 
+    ########## save policy NN parameters of the final policy and normalization parameters ##############################
     weights = policy.get_weights()
-
     file_weights = os.path.join(logger.path_weights, 'weights_' + str(iteration) + '.npy')
     np.save(file_weights, weights)
 
@@ -537,18 +317,14 @@ def main(network, num_policy_iterations, gamma, lam, kl_targ, batch_size, hid1_m
     np.save(file_scaler, np.asarray([scale, offset]))
     weights_set.append(policy.get_weights())
     scaler_set.append(copy.copy(scaler))
+    #####################################################################
 
     performance_evolution_all, ci_all = run_weights(network, weights_set, policy, scaler,
-                                        time_steps=int(1. / sum(network.p_arriving) *5* 10 * 10**6))
-
-    #performance_evolution = run_weights(network_id, len(weights_set)*[weights_set[-1]], policy, scaler,
-    #                                    time_steps=int(1. / sum(ray.get(network_id).p_arriving) * 10**3))
-
-    #ci = np.std(performance_evolution) * 1.96 / np.sqrt(len(performance_evolution))
-    #print(np.mean(performance_evolution), '+-', ci)
+                                        time_steps=int(1. / sum(network.p_arriving) * no_arrivals))
 
 
-    file_res = os.path.join(logger.path_weights, 'average_' + str(performance_evolution_all[-1]) + '+-' +str(ci_all[-1]) + '.txt')
+    file_res = os.path.join(logger.path_weights,
+                            'average_' + str(performance_evolution_all[-1]) + '+-' +str(ci_all[-1]) + '.txt')
     file = open(file_res, "w")
     for i in range(len(ci_all)):
         file.write(str(performance_evolution_all[i])+'\n')
@@ -567,33 +343,43 @@ if __name__ == "__main__":
 
     network = pn.ProcessingNetwork.Nmodel_from_load(load=0.95)
 
-    #network_id = ray.put(network)
-
-
     parser = argparse.ArgumentParser(description=('Train policy for a queueing network '
                                                   'using Proximal Policy Optimizer'))
 
     parser.add_argument('-n', '--num_policy_iterations', type=int, help='Number of policy iterations to run',
                         default = 200)
+    parser.add_argument('-b', '--no_of_actors', type=int, help='Number of episodes per training batch',
+                        default = 2)
+    parser.add_argument('-t', '--episode_duration', type=int, help='Number of time-steps per an episode',
+                        default = 10**3)
+    parser.add_argument('-x', '--no_arrivals', type=int, help='Number of arrivals to evaluate policies',
+                        default = 5*10**6)
+
     parser.add_argument('-g', '--gamma', type=float, help='Discount factor',
                         default = 0.998)
     parser.add_argument('-l', '--lam', type=float, help='Lambda for Generalized Advantage Estimation',
                         default = 0.992)
-    parser.add_argument('-k', '--kl_targ', type=float, help='D_KL target value',
-                        default = 0.003)
-    parser.add_argument('-b', '--batch_size', type=int, help='Number of episodes per training batch',
-                        default = 2)
-    parser.add_argument('-m', '--hid1_mult', type=int, help='Size of first hidden layer for value and policy NNs',
-                        default = 10)
-    parser.add_argument('-t', '--episode_duration', type=int, help='Number of time-steps per an episode',
-                        default = 10**3)
     parser.add_argument('-c', '--clipping_parameter', type=float, help='Initial clipping parameter',
                         default = 0.2)
-    parser.add_argument('-s', '--skipping_steps', type=int, help='Number of steps for which control is fixed',
-                        default = 1)
-    parser.add_argument('-i', '--initial_state_procedure', type=str,
-                        help='procedure of generation intial states. Options: previous_iteration, LBFS, load, FBFS, cmu-policy, empty',
-                        default = 'previous_iteration')
+
+    parser.add_argument('-e', '--ep_v', type=float, help='number of epochs for value NN training',
+                        default = 10)
+    parser.add_argument('-s', '--bs_v', type=float, help='minibatch size for value NN training',
+                        default = 10)
+    parser.add_argument('-r', '--lr_v', type=float, help='learning rate for value NN training',
+                        default = 2.5 * 10**(-4))
+
+    parser.add_argument('-p', '--ep_p', type=float, help='number of epochs for policy NN training',
+                        default = 3)
+    parser.add_argument('-w', '--bs_p', type=float, help='minibatch size for policy NN training',
+                        default = 3)
+    parser.add_argument('-q', '--lr_p', type=float, help='learning rate for policy NN training',
+                        default = 5. * 10 ** (-4))
+
+    parser.add_argument('-k', '--kl_targ', type=float, help='D_KL target value',
+                        default = 0.003)
+    parser.add_argument('-m', '--hid1_mult', type=int, help='Size of first hidden layer for value and policy NNs',
+                        default = 10)
 
 
     args = parser.parse_args()

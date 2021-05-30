@@ -17,7 +17,7 @@ class Scaler(object):
         scale = 1 / (stddev + 0.1) / 3 (i.e. 3x stddev = +/- 1.0)
     """
 
-    def __init__(self, obs_dim, initial_states_procedure):
+    def __init__(self, obs_dim):
         """
         Args:
             obs_dim: dimension of axis=1
@@ -27,11 +27,8 @@ class Scaler(object):
         self.m = 0
         self.n = 0
         self.first_pass = True
-        self.initial_states_procedure = initial_states_procedure
-        if  self.initial_states_procedure=='previous_iteration':
-            self.initial_states = [np.zeros(obs_dim, 'int32')]
-        else:
-            self.initial_states = [np.zeros(obs_dim+1, 'int32')]
+        self.initial_states = [np.zeros(obs_dim, 'int32')]
+
     def update_initial(self, x):
         self.initial_states = random.sample(list(x), 99)
 
@@ -44,8 +41,7 @@ class Scaler(object):
         see: https://stats.stackexchange.com/questions/43159/how-to-calculate-pooled-
                variance-of-two-groups-given-known-group-variances-mean
         """
-        if self.initial_states_procedure == 'previous_iteration':
-            self.initial_states = random.sample(list(x), 99)
+        self.initial_states = random.sample(list(x), 99)
 
         if self.first_pass:
             self.means = np.mean(x, axis=0)

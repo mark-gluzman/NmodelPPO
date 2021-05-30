@@ -7,7 +7,7 @@ import copy
 
 
 class ProcessingNetwork:
-    # Multiclass Queuing Network class
+    # N-model network class
     def __init__(self, A, D, alpha, mu, holding_cost,  name):
         self.alpha = np.asarray(alpha)  # arrival rates
         self.mu = np.asarray(mu)  # service rates
@@ -35,7 +35,6 @@ class ProcessingNetwork:
 
         self.dict_absolute_to_binary_action, self.dict_absolute_to_per_server_action = self.absolute_to_binary()
         self.actions = list(self.dict_absolute_to_binary_action.values())  # list of all actions
-
 
 
     @classmethod
@@ -159,9 +158,6 @@ class ProcessingNetwork:
         """
 
         num = len(states_array)
-
-
-
 
         prod_for_actions_list = []
 
