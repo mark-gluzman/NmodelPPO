@@ -10,7 +10,7 @@ https://web.stanford.edu/~glynn/papers/2002/HendersonG02.pdf
 """
 import ray  # package for distributed computations
 import numpy as np
-from policy import Policy
+from actor_utils import Policy
 from value_function import NNValueFunction
 from utils import Logger, Scaler
 import os
@@ -19,16 +19,16 @@ import NmodelDynamics as pn
 import random
 import datetime
 import copy
+
+
 ray.init()
 
-MAX_ACTORS = 1  # max number of parallel simulations
+MAX_ACTORS = 2  # max number of parallel simulations
+
 
 def diag_dot(A, B):
     # returns np.diag(np.dot(A, B))
     return np.einsum("ij,ji->i", A, B)
-
-
-
 
 
 def run_weights(network_id, weights_set, policy, scaler, time_steps):
@@ -104,11 +104,14 @@ def run_policy(network, policy, scaler, logger, gamma,
     '''
     #### declare actors for distributed simulations of a current policy#####
     remote_network = ray.remote(Policy)
-    simulators = [remote_network.remote(policy.get_obs_dim(),policy.get_act_dim(), policy.get_kl_targ(), policy.get_hid1_mult()) for _ in range(MAX_ACTORS)]
+    simulators = [remote_network.remote(policy.nn.obs_dim, policy.nn.act_dim, policy.nn.kl_targ, policy.nn.hid1_mult)
+                  for _ in range(MAX_ACTORS)]
+
     actors_per_run = episodes // MAX_ACTORS # do not run more parallel processes than number of cores
     remainder = episodes - actors_per_run * MAX_ACTORS
     weights = policy.get_weights()  # get neural network parameters
-    ray.get([s.set_weights.remote(weights) for s in simulators]) # assign the neural network weights to all actors
+    for s in simulators: # assign the neural network weights to all actors
+        s.set_weights.remote(weights)
     ######################################################
 
 
@@ -125,10 +128,10 @@ def run_policy(network, policy, scaler, logger, gamma,
     accum_res = []  # results accumulator from all actors
     trajectories = []  # list of trajectories
     for j in range(actors_per_run):
-        accum_res.extend(ray.get([simulators[i].run_episode.remote(network_id, scaler_id, time_steps,
+        accum_res.extend(ray.get([simulators[i].run_episode.remote(network, scaler_id, time_steps,
                                 skipping_steps,  initial_states_set[j*MAX_ACTORS+i]) for i in range(MAX_ACTORS)]))
     if remainder>0:
-        accum_res.extend(ray.get([simulators[i].run_episode.remote(network_id, scaler_id, time_steps,
+        accum_res.extend(ray.get([simulators[i].run_episode.remote(network, scaler_id, time_steps,
                                 skipping_steps, initial_states_set[actors_per_run*MAX_ACTORS+i]) for i in range(remainder)]))
     print('simulation is done')
 
@@ -421,6 +424,7 @@ def build_train_set(trajectories, gamma, scaler):
     #     for i in states_positions[key]:
     #         disc_sum_rew[i] = av
     # ########################################################################################
+
     end_time = datetime.datetime.now()
     time_policy = end_time - start_time
     print('build_train_set time:', int((time_policy.total_seconds() / 60) * 100) / 100., 'minutes')
@@ -468,10 +472,6 @@ def main(network, num_policy_iterations, gamma, lam, kl_targ, batch_size, hid1_m
 
 
 
-
-
-
-
     ############## creating set of initial states for episodes in simulations##########################
     if initial_state_procedure=='empty':
         x = np.zeros((50000, obs_dim), dtype= 'int8')
@@ -504,7 +504,7 @@ def main(network, num_policy_iterations, gamma, lam, kl_targ, batch_size, hid1_m
         print('Clipping range is ', policy.clipping_range)
 
         if iteration % 10 == 1:
-            weights_set.append(policy.nn.get_weights())
+            weights_set.append(policy.get_weights())
             scaler_set.append(copy.copy(scaler))
 
         trajectories = run_policy(network, policy, scaler, logger, gamma, iteration, skipping_steps,
@@ -582,7 +582,7 @@ if __name__ == "__main__":
     parser.add_argument('-k', '--kl_targ', type=float, help='D_KL target value',
                         default = 0.003)
     parser.add_argument('-b', '--batch_size', type=int, help='Number of episodes per training batch',
-                        default = 1)
+                        default = 2)
     parser.add_argument('-m', '--hid1_mult', type=int, help='Size of first hidden layer for value and policy NNs',
                         default = 10)
     parser.add_argument('-t', '--episode_duration', type=int, help='Number of time-steps per an episode',

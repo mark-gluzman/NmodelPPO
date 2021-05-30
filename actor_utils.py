@@ -2,7 +2,8 @@ import numpy as np
 import tensorflow as tf
 import ray.experimental
 import datetime
-import sklearn
+
+from sklearn.utils import shuffle
 
 class PolicyNN(tf.keras.Model):
     def __init__(self, obs_dim, act_dim, kl_targ, hid1_mult):
@@ -27,7 +28,12 @@ class PolicyNN(tf.keras.Model):
         self.hid3 = tf.keras.layers.Dense(hid3_size, activation='relu')
         self.a = tf.keras.layers.Dense(2, activation='softmax')
 
-    def call(self, input_data, step_type=(), network_state=()):
+        # known issue, requires passing a sample input data, see
+        # https://stackoverflow.com/questions/60106829/cannot-build-custom-keras-model-with-custom-loss/60986815#60986815
+        self.call(np.array([[0, 0]]))
+
+
+    def call(self, input_data, step_type=(), network_state=(), training=False):
         x1 = self.hid1(input_data)
         x2 = self.hid2(x1)
         x3 = self.hid3(x2)
@@ -40,54 +46,42 @@ class Policy(object):
         self.nn = PolicyNN(obs_dim, act_dim, kl_targ, hid1_mult)
         self.lr = 5. * 10 ** (-4)
         self.a_opt = tf.keras.optimizers.Adam(learning_rate=self.lr)
-        self.clip_pram = clipping_range
+        self.clipping_range = clipping_range
         self.epochs = 3
+        self.batch_size = 128
 
-    def loss(self, probs, actions, adv, old_probs):
+    def sur_loss(self, probs, actions, adv, old_probs):
         adv = tf.cast(adv, 'float32')
-        entropy = tf.reduce_mean(tf.math.negative(tf.math.multiply(probs, tf.math.log(probs))))
-        # print(probability)
-        # print(entropy)
-        sur1 = []
-        sur2 = []
+        self.entropy = tf.reduce_mean(tf.math.negative(tf.math.multiply(probs, tf.math.log(probs))))
+
         act_probs = tf.reduce_sum(probs * tf.one_hot(indices=actions.astype('int32').flatten(), depth=probs.shape[1]), axis=1)
         act_probs_old = tf.reduce_sum(old_probs * tf.one_hot(indices=actions.astype('int32').flatten(), depth=probs.shape[1]), axis=1)
 
+        ratios = tf.math.exp(tf.math.log(act_probs) - tf.math.log(act_probs_old))
+        clipped_ratios = tf.clip_by_value(ratios, clip_value_min=1 - self.clipping_range, clip_value_max=1 + self.clipping_range)
+        loss_clip = tf.minimum(tf.multiply(adv, ratios), tf.multiply(adv, clipped_ratios))
 
-        for pb, t, op in zip(act_probs, adv, act_probs_old):
-            t = tf.constant(t)
-            op = tf.constant(op)
-            # print(f"t{t}")
-            # ratio = tf.math.exp(tf.math.log(pb + 1e-10) - tf.math.log(op + 1e-10))
-            ratio = tf.math.divide(pb, op)
-            # print(f"ratio{ratio}")
-            s1 = tf.math.multiply(ratio, t)
-            # print(f"s1{s1}")
-            s2 = tf.math.multiply(tf.clip_by_value(ratio, 1.0 - self.clip_pram, 1.0 + self.clip_pram), t)
-            # print(f"s2{s2}")
-            sur1.append(s1)
-            sur2.append(s2)
+        loss = tf.math.negative(tf.reduce_mean(loss_clip))#- self.entropy*0.0001
 
-        sr1 = tf.stack(sur1)
-        sr2 = tf.stack(sur2)
-
-        # closs = tf.reduce_mean(tf.math.square(td))
-        loss = tf.math.negative(tf.reduce_mean(tf.math.minimum(sr1, sr2)) + 0.001 * entropy)
-        # print(loss)
         return loss
 
     def update(self, states, actions, adv, logger):
-        old_probs = self.nn(np.array(states))
-        for _ in range(self.epochs):
-            adv = tf.reshape(adv, (len(adv),))
-            with tf.GradientTape() as tape:
-                p = self.nn(states, training=True)
-                a_loss = self.loss(p, actions, adv, old_probs)
+        old_probs = self.nn(np.array(states)).numpy()
+        #adv = tf.reshape(adv, (len(adv),))
+        bat_per_epoch = int(len(states) / self.batch_size)
+        policy_loss = 0
+        for epoch in range(self.epochs):
+            states, actions, adv, old_probs = shuffle(states, actions, adv, old_probs)
+            policy_loss = 0
+            for i in range(bat_per_epoch):
+                n = i * self.batch_size
+                policy_loss += self.batch_step(states[n:n + self.batch_size], actions[n:n + self.batch_size],
+                                 adv[n:n + self.batch_size], old_probs[n:n + self.batch_size]).numpy()
 
-            grads = tape.gradient(a_loss, self.nn.trainable_variables)
-            self.a_opt.apply_gradients(zip(grads, self.nn.trainable_variables))
+            print('Policy NN learning epoch #', epoch, ' Loss = ', policy_loss)
 
-        logger.log({'PolicyLoss': a_loss,
+
+        logger.log({'PolicyLoss': policy_loss,
                   #'Clipping': clipping_range,
                   #'Max ratio': max(ratios),
                   #'Min ratio': min(ratios),
@@ -97,6 +91,23 @@ class Policy(object):
                   #'Beta': self.beta,
                   #'_lr_multiplier': self.lr_multiplier}
                     })
+
+
+    def batch_step(self, states, actions, adv, old_probs):
+
+        with tf.GradientTape() as tape:
+            # Make prediction
+            p = self.nn(states, training=True)
+            # Calculate loss
+            loss = self.sur_loss(p, actions, adv, old_probs)
+        # Calculate gradients
+        grads = tape.gradient(loss, self.nn.trainable_variables)
+        # Update model
+        self.a_opt.apply_gradients(zip(grads, self.nn.trainable_variables))
+
+        return loss
+
+
 
 
 
@@ -318,54 +329,16 @@ class Policy(object):
     #     optimizer = tf.train.AdamOptimizer(self.lr_ph)
     #     self.train_init = optimizer.minimize(self.kl)
 
-    def initilize_rpp(self, observes, action_distr, batch_size=256):
-        """
-        Policy Neural Network update
-        :param observes: states
-        :param actions: actions
-        :param advantages: estimation of antantage function at observed states
-        :param logger: statistics accumulator
-        """
-
-        num_batches = max(observes.shape[0] // batch_size, 1)
-        batch_size = observes.shape[0] // num_batches
-
-        for e in range(20):
-            x_train, *y_train = sklearn.utils.shuffle(observes, *action_distr)
-            for j in range(num_batches):
-                start = j * batch_size
-                end = (j + 1) * batch_size
-                feed_dict = {self.obs_ph: x_train[start:end, :],
-                             self.beta_ph: self.beta,
-                             self.lr_ph: self.lr * self.lr_multiplier,
-                             self.act_ph: 0 * observes[:, 0:2],
-                             self.advantages_ph: 0 * observes[:, 0]}
-                for i in range(len(self.act_dim)):
-                    feed_dict[self.old_act_prob_ph[i]] = y_train[i][start:end, :]
-
-                self.sess.run(self.train_init, feed_dict)
-
-
-
-    def close_sess(self):
-        """ Close TensorFlow session """
-        self.sess.close()
-
-    def get_obs_dim(self):
-        return self.obs_dim
-
-    def get_hid1_mult(self):
-        return self.hid1_mult
-
-    def get_act_dim(self):
-        return self.act_dim
-
-    def get_weights(self):
-        return self.variables.get_weights()
 
     def set_weights(self, weights):
-        # Set the weights in the network.
-        self.variables.set_weights(weights)
+        self.nn.set_weights(weights)
 
-    def get_kl_targ(self):
-        return self. kl_targ
+    def get_weights(self):
+        return self.nn.get_weights()
+
+
+
+
+
+
+
