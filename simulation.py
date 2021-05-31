@@ -25,7 +25,7 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
 
     scale, offset = scaler.get()
 
-    '''
+
     initial_states_set = random.sample(scaler.initial_states, k=no_episodes)
     trajectory, total_steps = policy.run_episode(network, scaler, time_steps,  initial_states_set[0])
     trajectories = []
@@ -71,7 +71,7 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
         total_steps += accum_res[i][1]  # total time-steps
 
     #################################################
-
+    '''
     average_reward = np.mean([t['rewards'] for t in trajectories])
 
     #### normalization of the states in data ####################
@@ -124,3 +124,7 @@ def run_weights(network, weights_set, policy, scaler, time_steps):
     print('Average cost: ', average_cost_set)
     print('CI: ', ci_set)
     return average_cost_set, ci_set
+
+
+
+

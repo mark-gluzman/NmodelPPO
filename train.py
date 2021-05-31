@@ -81,12 +81,12 @@ def add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteratio
 
     unscaled_obs = np.concatenate([t['unscaled_obs'][:-burn] for t in trajectories])
     disc_sum_rew = np.concatenate([t['disc_sum_rew'][:-burn] for t in trajectories])
-    if iteration ==1:
+    if iteration == 1:
         scaler.update(np.hstack((unscaled_obs, disc_sum_rew)))
     scale, offset = scaler.get()
     observes = (unscaled_obs - offset[:-1]) * scale[:-1]
     disc_sum_rew_norm = (disc_sum_rew - offset[-1]) * scale[-1]
-    if iteration ==1:
+    if iteration == 1:
         for t in trajectories:
             t['observes'] = (t['unscaled_obs'] - offset[:-1]) * scale[:-1]
 

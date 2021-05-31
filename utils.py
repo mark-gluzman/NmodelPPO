@@ -22,8 +22,8 @@ class Scaler(object):
         Args:
             obs_dim: dimension of axis=1
         """
-        self.vars = np.zeros(obs_dim)
-        self.means = np.zeros(obs_dim)
+        self.vars = np.ones(obs_dim)*100
+        self.means = np.ones(obs_dim)*10
         self.m = 0
         self.n = 0
         self.first_pass = True
