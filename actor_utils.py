@@ -279,7 +279,7 @@ class Policy(object):
 
 
 def check_optimality(trajectory, file_name = 'action09.npy'):
-    optimal_actions = np.load(file_name)
+    optimal_actions = np.load(file_name)-1.
     no_opt_actions = 0
     total_decision_time_steps = len(trajectory['unscaled_obs'])
     for k in range(len(trajectory['unscaled_obs'])):
