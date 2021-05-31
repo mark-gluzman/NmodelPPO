@@ -4,11 +4,9 @@ import tensorflow as tf
 from sklearn.utils import shuffle
 
 class PolicyNN(tf.keras.Model):
-    def __init__(self, obs_dim, act_dim, kl_targ, hid1_mult):
+    def __init__(self, obs_dim, act_dim, hid1_mult):
         super().__init__()
 
-        self.beta = 3  # dynamically adjusted D_KL loss multiplier
-        self.kl_targ = kl_targ
         self.hid1_mult = hid1_mult
 
         self.obs_dim = obs_dim
@@ -36,13 +34,14 @@ class PolicyNN(tf.keras.Model):
 
 
 class Policy(object):
-    def __init__(self, obs_dim, act_dim, kl_targ, hid1_mult, ep_p, bs_p, lr_p, clipping_range):
-        self.nn = PolicyNN(obs_dim, act_dim, kl_targ, hid1_mult)
+    def __init__(self, obs_dim, act_dim, hid1_mult, kl_targ, ep_p, bs_p, lr_p, clipping_range):
+        self.nn = PolicyNN(obs_dim, act_dim, hid1_mult)
 
         self.lr = lr_p
         self.clipping_range = clipping_range
         self.epochs = ep_p
         self.batch_size = bs_p
+        self.kl_targ = kl_targ
 
     def sur_loss(self, probs, actions, adv, old_probs):
         adv = tf.cast(adv, 'float32')
@@ -60,7 +59,8 @@ class Policy(object):
         return loss
 
     def update(self, states, actions, adv, logger):
-        old_probs = self.nn(np.array(states)).numpy()
+        states = np.array(states, dtype='float32')
+        old_probs = self.nn(states).numpy()
         bat_per_epoch = int(len(states) / self.batch_size)
         policy_loss = 0
         a_opt = tf.keras.optimizers.Adam(learning_rate=self.lr)
@@ -69,16 +69,21 @@ class Policy(object):
             policy_loss = 0
             for i in range(bat_per_epoch):
                 n = i * self.batch_size
-                policy_loss += self.batch_step(states[n:n + self.batch_size], actions[n:n + self.batch_size],
-                                 adv[n:n + self.batch_size], old_probs[n:n + self.batch_size], optimizer=a_opt).numpy()
+                batch_loss, kl = self.batch_step(states[n:n + self.batch_size], actions[n:n + self.batch_size],
+                                 adv[n:n + self.batch_size], old_probs[n:n + self.batch_size], optimizer=a_opt)
+                policy_loss += batch_loss.numpy()
+
+                if kl.numpy() > self.kl_targ * 3:  # early stopping if D_KL diverges badly
+                    print('early stopping: D_KL diverges badly')
+                    break
+
 
             print('Policy NN learning epoch #', epoch, ' Loss = ', policy_loss)
-
-        probs = self.nn(np.array(states))
+        probs = self.nn(states)
         entropy = tf.reduce_mean(tf.math.negative(tf.math.multiply(probs, tf.math.log(probs))))
         kl = tf.reduce_mean(tf.math.multiply(probs, tf.math.log(tf.math.divide(probs, old_probs))))
-        act_probs = tf.reduce_sum(probs * tf.one_hot(indices=actions.astype('int32').flatten(), depth=probs.shape[1]),
-                                  axis=1)
+        act_probs = tf.reduce_sum(
+            probs * tf.one_hot(indices=actions.astype('int32').flatten(), depth=probs.shape[1]),axis=1)
         act_probs_old = tf.reduce_sum(
             old_probs * tf.one_hot(indices=actions.astype('int32').flatten(), depth=probs.shape[1]), axis=1)
 
@@ -105,8 +110,8 @@ class Policy(object):
         grads = tape.gradient(loss, self.nn.trainable_variables)
         # Update model
         optimizer.apply_gradients(zip(grads, self.nn.trainable_variables))
-
-        return loss
+        kl = tf.reduce_mean(tf.math.multiply(p, tf.math.log(tf.math.divide(p, old_probs))))
+        return loss, kl
 
     def set_weights(self, weights):
         self.nn.set_weights(weights)
@@ -224,13 +229,10 @@ class Policy(object):
 
         scale, offset = scaler.get()
 
-        if sum(initial_state[:-1]) > 300 :
+        if sum(initial_state[:-1]) > 300:
             initial_state = np.zeros(network.buffers_num+1, 'int8')
+        state = np.asarray(initial_state[:-1],'int32')
 
-
-            state = np.asarray(initial_state[:-1],'int32')
-        else:
-            state = np.asarray(initial_state, 'int32')
         print(state)
 
         batch = -1

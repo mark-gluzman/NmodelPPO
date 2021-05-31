@@ -35,7 +35,7 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
     remote_network = ray.remote(Policy)
 
 
-    simulators = [remote_network.remote(policy.nn.obs_dim, policy.nn.act_dim, policy.nn.kl_targ, policy.nn.hid1_mult,
+    simulators = [remote_network.remote(policy.nn.obs_dim, policy.nn.act_dim, policy.nn.hid1_mult, policy.kl_targ,
                                         policy.epochs, policy.batch_size, policy.lr, policy.clipping_range)
                   for _ in range(MAX_ACTORS)]
 
@@ -76,16 +76,9 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
 
     #### normalization of the states in data ####################
     unscaled = np.concatenate([t['unscaled_obs'][:-burn] for t in trajectories])
-    if gamma < 1.0:
-        for t in trajectories:
-            t['observes'] = (t['unscaled_obs'] - offset[:-1]) * scale[:-1]
+    for t in trajectories:
+        t['observes'] = (t['unscaled_obs'] - offset[:-1]) * scale[:-1]
 
-
-    else:
-        for t in trajectories:
-            t['observes'] = (t['unscaled_obs'] - offset[:-1]) * scale[:-1]
-            z = t['rewards'] - average_reward
-            t['rewards'] = z
     ##################################################################
 
     scaler.update_initial(np.hstack((unscaled, np.zeros(len(unscaled))[np.newaxis].T)))
@@ -102,16 +95,13 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
 
 
 def run_weights(network, weights_set, policy, scaler, time_steps):
-    if scaler.initial_states_procedure == 'previous_iteration':
-        initial_state_0 = np.zeros(policy.get_obs_dim() + 1)
-    else:
-        initial_state_0 = np.zeros(policy.get_obs_dim())
+    initial_state_0 = np.zeros(policy.nn.obs_dim + 1)
 
     episodes = len(weights_set)
 
     remote_network = ray.remote(Policy)
 
-    simulators = [remote_network.remote(policy.nn.obs_dim, policy.nn.act_dim, policy.nn.kl_targ, policy.nn.hid1_mult,
+    simulators = [remote_network.remote(policy.nn.obs_dim, policy.nn.act_dim, policy.nn.hid1_mult, policy.kl_targ,
                                         policy.epochs, policy.batch_size, policy.lr, policy.clipping_range)
                   for _ in range(episodes)]
 
@@ -119,9 +109,7 @@ def run_weights(network, weights_set, policy, scaler, time_steps):
 
     ray.get([s.set_weights.remote(weights_set[i]) for i, s in enumerate(simulators)])
 
-    scaler_id = ray.put(scaler)
-
-    res.extend(ray.get([simulators[i].policy_performance.remote(network, scaler_id, time_steps, initial_state_0, i)
+    res.extend(ray.get([simulators[i].policy_performance.remote(network, scaler, time_steps, initial_state_0, i)
                         for i in range(episodes)]))
 
     print('simulation is done')

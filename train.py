@@ -251,7 +251,7 @@ def main(network, num_policy_iterations, no_of_actors, episode_duration, no_arri
 
     scaler = Scaler(obs_dim + 1)
     val_func = NNValueFunction(obs_dim, hid1_mult, ep_v, bs_v, lr_v) # Value Neural Network initialization
-    policy = Policy(obs_dim, act_dim, kl_targ, hid1_mult, ep_p, bs_p, lr_p, clipping_parameter) # Policy Neural Network initialization
+    policy = Policy(obs_dim, act_dim, hid1_mult, kl_targ,  ep_p, bs_p, lr_p, clipping_parameter) # Policy Neural Network initialization
 
 
     ############## creating set of initial states for episodes in simulations##########################
@@ -294,7 +294,7 @@ def main(network, num_policy_iterations, no_of_actors, episode_duration, no_arri
     ########## save policy NN parameters of the final policy and normalization parameters ##############################
     weights = policy.get_weights()
     file_weights = os.path.join(logger.path_weights, 'weights_' + str(iteration) + '.npy')
-    np.save(file_weights, weights)
+    np.save(file_weights, np.array(weights, dtype=object))
 
     file_scaler = os.path.join(logger.path_weights, 'scaler_' + str(iteration) + '.npy')
     scale, offset = scaler.get()
@@ -331,13 +331,13 @@ if __name__ == "__main__":
                                                   'using Proximal Policy Optimizer'))
 
     parser.add_argument('-n', '--num_policy_iterations', type=int, help='Number of policy iterations to run',
-                        default = 200)
+                        default = 2)
     parser.add_argument('-b', '--no_of_actors', type=int, help='Number of episodes per training batch',
                         default = 2)
     parser.add_argument('-t', '--episode_duration', type=int, help='Number of time-steps per an episode',
                         default = 10**3)
     parser.add_argument('-x', '--no_arrivals', type=int, help='Number of arrivals to evaluate policies',
-                        default = 5*10**6)
+                        default = 5*10**3)
 
     parser.add_argument('-g', '--gamma', type=float, help='Discount factor',
                         default = 0.998)
