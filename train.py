@@ -325,45 +325,45 @@ def main(network, num_policy_iterations, no_of_actors, episode_duration, no_arri
 
 if __name__ == "__main__":
 
-    network = pn.ProcessingNetwork.Nmodel_from_load(load=0.95)
+    network = pn.ProcessingNetwork.Nmodel_from_load(load=0.9)
 
     parser = argparse.ArgumentParser(description=('Train policy for a queueing network '
                                                   'using Proximal Policy Optimizer'))
 
     parser.add_argument('-n', '--num_policy_iterations', type=int, help='Number of policy iterations to run',
-                        default = 2)
+                        default=100)
     parser.add_argument('-b', '--no_of_actors', type=int, help='Number of episodes per training batch',
-                        default = 2)
+                        default=4)
     parser.add_argument('-t', '--episode_duration', type=int, help='Number of time-steps per an episode',
-                        default = 10**3)
+                        default=50*10**3)
     parser.add_argument('-x', '--no_arrivals', type=int, help='Number of arrivals to evaluate policies',
-                        default = 5*10**3)
+                        default=5*10**6)
 
     parser.add_argument('-g', '--gamma', type=float, help='Discount factor',
-                        default = 0.998)
+                        default=0.998)
     parser.add_argument('-l', '--lam', type=float, help='Lambda for Generalized Advantage Estimation',
-                        default = 0.992)
+                        default=0.992)
     parser.add_argument('-c', '--clipping_parameter', type=float, help='Initial clipping parameter',
-                        default = 0.2)
+                        default=0.2)
 
     parser.add_argument('-e', '--ep_v', type=float, help='number of epochs for value NN training',
-                        default = 10)
+                        default=10)
     parser.add_argument('-s', '--bs_v', type=float, help='minibatch size for value NN training',
-                        default = 10)
+                        default=2048)
     parser.add_argument('-r', '--lr_v', type=float, help='learning rate for value NN training',
-                        default = 2.5 * 10**(-4))
+                        default=2.5 * 10**(-4))
 
     parser.add_argument('-p', '--ep_p', type=float, help='number of epochs for policy NN training',
-                        default = 3)
+                        default=3)
     parser.add_argument('-w', '--bs_p', type=float, help='minibatch size for policy NN training',
-                        default = 3)
+                        default=2048)
     parser.add_argument('-q', '--lr_p', type=float, help='learning rate for policy NN training',
-                        default = 5. * 10 ** (-4))
+                        default=5. * 10 ** (-4))
 
     parser.add_argument('-k', '--kl_targ', type=float, help='D_KL target value',
-                        default = 0.003)
+                        default=0.003)
     parser.add_argument('-m', '--hid1_mult', type=int, help='Size of first hidden layer for value and policy NNs',
-                        default = 10)
+                        default=10)
 
 
     args = parser.parse_args()

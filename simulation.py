@@ -4,7 +4,7 @@ from actor_utils import Policy
 import os
 import random
 
-MAX_ACTORS = 2  # max number of parallel simulations
+MAX_ACTORS = 4  # max number of parallel simulations
 
 def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episodes, time_steps):
     """
