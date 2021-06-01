@@ -1,14 +1,18 @@
 import numpy as np
 import NmodelDynamics as pn
 
-rho = 0.9
-N = 200
+
+## N model parameters
+rho = 0.9 # load
+N = 200 # truncation
 lambda_1 = 1.3 * rho
 lambda_2 = 0.4 * rho
 m_1 = 1
 m_2 = 1 / 2
 m_3 = 1
 nu = lambda_1 + lambda_2 + m_1 + m_2 + m_3
+
+
 
 V = dict()
 action = dict()
@@ -20,6 +24,7 @@ for i in range(N+1):
         action[(i, j)] = 1
         V_temp[(i, j)] = 0
 
+# value iteration
 for iteration in range(10000):
     print(iteration)
     for i in range(0, N+1):
@@ -97,6 +102,8 @@ for iteration in range(10000):
         for j in range(0, N+1):
             V[(i, j)] = V_temp[(i, j)] - a
 
+
+# saving optimal actions
 action_matr = np.zeros((N+1, N+1))
 
 for i in range(0, N+1):
@@ -116,6 +123,8 @@ state = [0, 0]
 summ = 0
 time = 2* 10**8 * int(sum(mu) /sum(alpha) +1 )
 print('total time:', time)
+
+# optimal policy evaluation
 for t in range(time):
 
     if action[(state[0], state[1])]==1:
