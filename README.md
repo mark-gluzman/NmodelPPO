@@ -3,7 +3,7 @@
 The repository implements Proximal policy optimization algorithm to optimize N-model control.
 
 ## N-model
-N-model processing network was first proposed in [1]. It is a processing network system with two independent Poisson input arrival flows, two servers, exponential service times, and
+The N-model processing network was first proposed in [1]. It is a processing network system with two independent Poisson input arrival flows, two servers, exponential service times, and
 linear holding costs. We use uniformization to convert the continuous-time control problem to a discrete-time control problem.\
 The detailed description of the system and its uniformization can be found in Section 5.3 of [2].\
 File `NmodelDynamics.py` contains an object describing the N-model. Its method `next_state_N1` generates the next state of the system given the current state and the action.  
