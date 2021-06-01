@@ -1,4 +1,4 @@
-# Reinforcement learning testing on the N-model processing network
+# N-model processing network control via Deep Reinforcement Learning
 
 The repository runs Proximal policy optimization algorithm to optimize N-model control.
 
