@@ -1,6 +1,6 @@
 # N-model processing network control via Deep Reinforcement Learning
 
-The repository runs Proximal policy optimization algorithm to optimize N-model control.
+The repository implements Proximal policy optimization algorithm to optimize N-model control.
 
 ## N-model
 N-model processing network was first proposed in [1]. It is a processing network system with two independent Poisson input arrival flows, two servers, exponential service times, and
