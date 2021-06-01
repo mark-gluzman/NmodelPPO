@@ -127,8 +127,11 @@ class ProcessingNetwork:
 
 
     def next_state_N1(self, state, action):
-        # generate a next state
-        # standard model as in Harrison
+        """
+        :param state: current state
+        :param action: action
+        :return: next state
+        """
 
         w = np.random.random()
         wi = 0

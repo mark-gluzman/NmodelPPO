@@ -44,6 +44,13 @@ class Policy(object):
         self.kl_targ = kl_targ
 
     def sur_loss(self, probs, actions, adv, old_probs):
+        """
+        :param probs: current action probabilities
+        :param actions: geenrated actions
+        :param adv: advantage function estimates
+        :param old_probs: action probabilities before training
+        :return: surrogate loss function
+        """
         adv = tf.cast(adv, 'float32')
         self.entropy = tf.reduce_mean(tf.math.negative(tf.math.multiply(probs, tf.math.log(probs))))
 
@@ -59,6 +66,13 @@ class Policy(object):
         return loss
 
     def update(self, states, actions, adv, logger):
+        """
+        policy NN parameters update
+        :param states: generated states
+        :param actions: generated actions
+        :param adv: estimates of the advantage fucntion
+        :param logger: stats tracker
+        """
         states = np.array(states, dtype='float32')
         old_probs = self.nn(states).numpy()
         bat_per_epoch = int(len(states) / self.batch_size)
@@ -100,6 +114,15 @@ class Policy(object):
                   'lr': self.lr})
 
     def batch_step(self, states, actions, adv, old_probs, optimizer):
+        """
+        minibatch gradient computation and optimization
+        :param states: generated states
+        :param actions: generated actions
+        :param adv: estimates of the advantage fucntion
+        :param old_probs: action probabilities before training
+        :param optimizer: NN optimizer
+        :return:
+        """
 
         with tf.GradientTape() as tape:
             # Make prediction
@@ -121,6 +144,7 @@ class Policy(object):
 
     def sample(self, obs, stochastic = True):
         """
+        returns action probabilities for states in 'obs'
         :param obs: state
         :return: if stochastic=True returns pi(a|x), else returns distribution with prob=1 on argmax[ pi(a|x) ]
         """
@@ -223,7 +247,16 @@ class Policy(object):
 
 
     def policy_performance(self, network, scaler, time_steps, initial_state, id, batch_num = 50, stochastic=True):
-
+        """
+        policy evaluation
+        :param network: queueing network
+        :param scaler: normalization stats
+        :param time_steps: episode length
+        :param initial_state: episode initial state
+        :param id: evaluation process id
+        :param batch_num: method computes CI splitting the episode on 'batch_num' batches
+        :return: policy performance
+        """
         average_performance_batch = np.zeros(batch_num)
         policy_buffer = {}
         batch_size = time_steps//batch_num
@@ -279,6 +312,11 @@ class Policy(object):
 
 
 def check_optimality(trajectory, file_name = 'action09.npy'):
+    """
+    :param trajectory: generate trajectory
+    :param file_name: file with array that contains optimal actions
+    :return: percentage of optimal actions chosen at trajectory
+    """
     optimal_actions = np.load(file_name)-1.
     no_opt_actions = 0
     total_decision_time_steps = len(trajectory['unscaled_obs'])

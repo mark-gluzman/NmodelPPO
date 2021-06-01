@@ -1,14 +1,3 @@
-"""
-Multiclass Queuing Network scheduling policy optimization using
-Proximal Policy Optimization method with Approximating Martingale-Process variance reduction
-PPO:
-https://arxiv.org/abs/1707.06347 (by Schulman et al., 2017)
-Generalized Advantage Estimation:
-https://arxiv.org/pdf/1506.02438.pdf (by Schulman et al., 2017)
-Approximating Martingale-Process Method (by Henderson, Glynn, 2002):
-https://web.stanford.edu/~glynn/papers/2002/HendersonG02.pdf
-"""
-import ray  # package for distributed computations
 import numpy as np
 from actor_utils import Policy
 from value_function import NNValueFunction
@@ -16,13 +5,14 @@ from utils import Logger, Scaler
 import os
 import argparse
 import NmodelDynamics as pn
-import random
 import datetime
 import copy
 
 from simulation import run_policy, run_weights
 
-ray.init()
+
+
+
 
 def diag_dot(A, B):
     # returns np.diag(np.dot(A, B))
@@ -82,7 +72,7 @@ def add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteratio
     unscaled_obs = np.concatenate([t['unscaled_obs'][:-burn] for t in trajectories])
     disc_sum_rew = np.concatenate([t['disc_sum_rew'][:-burn] for t in trajectories])
     if iteration == 1:
-        scaler.update(np.hstack((unscaled_obs, disc_sum_rew)))
+        scaler.update(np.hstack((unscaled_obs, disc_sum_rew))) # scaler updates just once
     scale, offset = scaler.get()
     observes = (unscaled_obs - offset[:-1]) * scale[:-1]
     disc_sum_rew_norm = (disc_sum_rew - offset[-1]) * scale[-1]
@@ -115,12 +105,12 @@ def add_value(trajectories, val_func, scaler, possible_states):
     scale, offset = scaler.get()
 
 
-    # approximate value function for trajectory_whole['unscaled_obs']
+    # get value NN values for generated states and all possible 'next' states
     for trajectory in trajectories:
         values = val_func.predict(trajectory['observes'])
         trajectory['values'] = values / scale[-1] + offset[-1]
 
-        # approximate value function of the states where transitions are possible from trajectory_whole['unscaled_obs']
+        # approximate value function of the states where transitions are possible from generated states
         values_set = np.zeros(( len(possible_states)+1, len(trajectory['observes'])))
 
         new_obs = (trajectory['unscaled_last'] - offset[:-1]) * scale[:-1]
@@ -143,7 +133,7 @@ def add_value(trajectories, val_func, scaler, possible_states):
 
 def build_train_set(trajectories, gamma, scaler):
     """
-    # data pre-processing for training
+    # data pre-processing for training, computation of advantage function estimates
     :param trajectory_whole:  simulated data
     :param scaler: normalization values
     :return: data for further Policy and Value neural networks training
@@ -177,7 +167,7 @@ def build_train_set(trajectories, gamma, scaler):
     start_time = datetime.datetime.now()
     burn = 1
 
-
+    # merge datapoints from all trajectories
     unscaled_obs = np.concatenate([t['unscaled_obs'][:-burn] for t in trajectories])
     disc_sum_rew = np.concatenate([t['disc_sum_rew'][:-burn] for t in trajectories])
 
@@ -188,7 +178,7 @@ def build_train_set(trajectories, gamma, scaler):
     advantages = advantages  / (advantages.std() + 1e-6) # normalize advantages
 
 
-
+    # uncomment if need to average over estimates for each state
     # ########## averaging value function estimations over all data ##########################
     # states_sum = {}
     # states_number = {}
@@ -249,7 +239,7 @@ def main(network, num_policy_iterations, no_of_actors, episode_duration, no_arri
     logger = Logger(logname=network.network_name, now=now, time_start=time_start)
 
 
-    scaler = Scaler(obs_dim + 1)
+    scaler = Scaler(obs_dim + 1) # object that keeps statistics needed for normalization before NNs training
     val_func = NNValueFunction(obs_dim, hid1_mult, ep_v, bs_v, lr_v) # Value Neural Network initialization
     policy = Policy(obs_dim, act_dim, hid1_mult, kl_targ,  ep_p, bs_p, lr_p, clipping_parameter) # Policy Neural Network initialization
 
@@ -262,7 +252,7 @@ def main(network, num_policy_iterations, no_of_actors, episode_duration, no_arri
     weights_set = []
     scaler_set = []
     while iteration < num_policy_iterations:
-        # decrease clipping_range and learning rate
+        # decrease clipping_range and learning rate each iteration
         iteration += 1
         alpha = 1. - iteration / num_policy_iterations
         policy.clipping_range = max(0.01, alpha*clipping_parameter)
@@ -274,20 +264,21 @@ def main(network, num_policy_iterations, no_of_actors, episode_duration, no_arri
 
         # simulate trajectories
         trajectories = run_policy(network, policy, scaler, logger, gamma, iteration,
-                                      no_episodes=no_of_actors, time_steps=episode_duration)  #simulation
-        # add estimated values to episodes
+                                      no_episodes=no_of_actors, time_steps=episode_duration)
+        # compute value NN for each visited state
         add_value(trajectories, val_func, scaler, network.next_state_list())
-        # calculate values from data
+        # compute estimated of the value function
         observes, disc_sum_rew_norm = add_disc_sum_rew(trajectories, policy, network, gamma, lam, scaler, iteration)
         # update value function
         val_func.fit(observes, disc_sum_rew_norm, logger)
-        # add estimated values to episodes
+        # recompute value NN for each visited state
         add_value(trajectories, val_func, scaler, network.next_state_list())
         # compute advantage function estimates
         observes, actions, advantages, disc_sum_rew = build_train_set(trajectories, gamma, scaler)
-        log_batch_stats(observes, actions, advantages, disc_sum_rew, logger, iteration)  # add various stats
-
-        policy.update(observes, actions, np.squeeze(advantages), logger)  # update policy
+        # add various stats
+        log_batch_stats(observes, actions, advantages, disc_sum_rew, logger, iteration)
+        # update policy
+        policy.update(observes, actions, np.squeeze(advantages), logger)
 
         logger.write(display=True)  # write logger results to file and stdout
 
@@ -303,6 +294,7 @@ def main(network, num_policy_iterations, no_of_actors, episode_duration, no_arri
     scaler_set.append(copy.copy(scaler))
     #####################################################################
 
+    #
     performance_evolution_all, ci_all = run_weights(network, weights_set, policy, scaler,
                                         time_steps=int(1. / sum(network.p_arriving) * no_arrivals))
 
@@ -333,9 +325,9 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--num_policy_iterations', type=int, help='Number of policy iterations to run',
                         default=100)
     parser.add_argument('-b', '--no_of_actors', type=int, help='Number of episodes per training batch',
-                        default=4)
+                        default=2)
     parser.add_argument('-t', '--episode_duration', type=int, help='Number of time-steps per an episode',
-                        default=50*10**3)
+                        default=100*10**3)
     parser.add_argument('-x', '--no_arrivals', type=int, help='Number of arrivals to evaluate policies',
                         default=5*10**6)
 
@@ -349,7 +341,7 @@ if __name__ == "__main__":
     parser.add_argument('-e', '--ep_v', type=float, help='number of epochs for value NN training',
                         default=10)
     parser.add_argument('-s', '--bs_v', type=float, help='minibatch size for value NN training',
-                        default=2048)
+                        default=128)
     parser.add_argument('-r', '--lr_v', type=float, help='learning rate for value NN training',
                         default=2.5 * 10**(-4))
 
@@ -358,7 +350,7 @@ if __name__ == "__main__":
     parser.add_argument('-w', '--bs_p', type=float, help='minibatch size for policy NN training',
                         default=2048)
     parser.add_argument('-q', '--lr_p', type=float, help='learning rate for policy NN training',
-                        default=5. * 10 ** (-4))
+                        default=2.5 * 10 ** (-4))
 
     parser.add_argument('-k', '--kl_targ', type=float, help='D_KL target value',
                         default=0.003)

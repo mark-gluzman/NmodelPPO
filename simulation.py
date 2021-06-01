@@ -4,12 +4,13 @@ from actor_utils import Policy
 import os
 import random
 
-MAX_ACTORS = 4  # max number of parallel simulations
+MAX_ACTORS = 4  # max number of parallel simulations, change based on number of cores
+ray.init()
 
 def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episodes, time_steps):
     """
     Run given policy and collect data
-    :param network_id: queuing network structure and first-order info
+    :param network: queuing network structure and first-order info
     :param policy: queuing network policy
     :param scaler: normalization values
     :param logger: metadata accumulator
@@ -25,7 +26,7 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
 
     scale, offset = scaler.get()
 
-    '''
+    ''' #uncomment to test with no multiprocessing
     initial_states_set = random.sample(scaler.initial_states, k=no_episodes)
     trajectory, total_steps = policy.run_episode(network, scaler, time_steps,  initial_states_set[0])
     trajectories = []
@@ -95,18 +96,25 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
 
 
 def run_weights(network, weights_set, policy, scaler, time_steps):
+    '''
+    method estimates performance of policy NN which parameters are from 'weights_set' set of parameters
+    :param network: queuing network structure and first-order info
+    :param policy: queuing network policy
+    :param weights_set: policy NN parameters
+    :param scaler: normalization stats
+    :param time_steps: episode length
+    :return: estimates of average cost for policy NN with parameters from set 'weights_set'
+    '''
+    # generate initial states for the episodes
     initial_state_0 = np.zeros(policy.nn.obs_dim + 1)
-
     episodes = len(weights_set)
-
     remote_network = ray.remote(Policy)
-
+    # create simulators
     simulators = [remote_network.remote(policy.nn.obs_dim, policy.nn.act_dim, policy.nn.hid1_mult, policy.kl_targ,
                                         policy.epochs, policy.batch_size, policy.lr, policy.clipping_range)
                   for _ in range(episodes)]
 
     res = []
-
     ray.get([s.set_weights.remote(weights_set[i]) for i, s in enumerate(simulators)])
 
     res.extend(ray.get([simulators[i].policy_performance.remote(network, scaler, time_steps, initial_state_0, i)
@@ -114,6 +122,7 @@ def run_weights(network, weights_set, policy, scaler, time_steps):
 
     print('simulation is done')
 
+    # get the results
     average_cost_set = np.zeros(episodes)
     ci_set = np.zeros(episodes)
 
