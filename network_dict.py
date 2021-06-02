@@ -5,7 +5,7 @@ network_dictionary = {
         'D': [[1, 1]],
         'alpha': [1.3 * 0.95, 0.4 * 0.95],
         'mu': [1, 1. / 2, 1],
-        'name': 'Nmodel',
+        'name': 'N-model',
         'holding_cost': [3., 1.]
     },
 

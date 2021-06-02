@@ -224,20 +224,20 @@ class Policy(object):
 
         total_steps += len(actions)
         # record simulation
-
+        no_opt_actions = check_optimality(unscaled_obs, actions)
         trajectory = {#'observes': observes,
                       'actions': actions,
                       'actions_glob': actions_glob,
                       'rewards': rewards,
                       'unscaled_obs': unscaled_obs,
-                      'unscaled_last': unscaled_last
+                      'unscaled_last': unscaled_last,
+                      'no_opt_actions': no_opt_actions
                   }
 
-        no_opt_actions = check_optimality(trajectory)
 
-        print('Network:', network.network_name + '.', 'time of an episode:',
-               'Average cost:', -np.mean(trajectory['rewards']),
-               'No of optimal actions:', no_opt_actions,'%.')
+
+        print('Network:', network.network_name + '.',
+               'Average cost:', -np.mean(trajectory['rewards']))
 
         return trajectory, total_steps
 
@@ -311,7 +311,7 @@ class Policy(object):
         return average_performance, id, ci
 
 
-def check_optimality(trajectory, file_name = 'action09.npy'):
+def check_optimality(unscaled_obs, actions, file_name = 'action09.npy'):
     """
     :param trajectory: generate trajectory
     :param file_name: file with array that contains optimal actions
@@ -319,15 +319,14 @@ def check_optimality(trajectory, file_name = 'action09.npy'):
     """
     optimal_actions = np.load(file_name)-1.
     no_opt_actions = 0
-    total_decision_time_steps = len(trajectory['unscaled_obs'])
-    for k in range(len(trajectory['unscaled_obs'])):
-        state = trajectory['unscaled_obs'][k]
-        action = trajectory['actions'][k][0]
+    total_decision_time_steps = len(unscaled_obs)
+    for k in range(len(unscaled_obs)):
+        state = unscaled_obs[k]
+        action = actions[k][0]
         if state[0] < optimal_actions.shape[0] and state[1] < optimal_actions.shape[1] and state[0]*state[1] > 0:
             if action == optimal_actions[state[0], state[1]]:
                 no_opt_actions += 1
         else:
             total_decision_time_steps -= 1
-
 
     return no_opt_actions*100 // total_decision_time_steps

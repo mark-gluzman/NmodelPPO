@@ -323,25 +323,25 @@ if __name__ == "__main__":
                                                   'using Proximal Policy Optimizer'))
 
     parser.add_argument('-n', '--num_policy_iterations', type=int, help='Number of policy iterations to run',
-                        default=100)
+                        default=50)
     parser.add_argument('-b', '--no_of_actors', type=int, help='Number of episodes per training batch',
                         default=2)
     parser.add_argument('-t', '--episode_duration', type=int, help='Number of time-steps per an episode',
-                        default=100*10**3)
+                        default=20*10**3)
     parser.add_argument('-x', '--no_arrivals', type=int, help='Number of arrivals to evaluate policies',
                         default=5*10**6)
 
     parser.add_argument('-g', '--gamma', type=float, help='Discount factor',
                         default=0.998)
     parser.add_argument('-l', '--lam', type=float, help='Lambda for Generalized Advantage Estimation',
-                        default=0.992)
+                        default=0.99)
     parser.add_argument('-c', '--clipping_parameter', type=float, help='Initial clipping parameter',
                         default=0.2)
 
     parser.add_argument('-e', '--ep_v', type=float, help='number of epochs for value NN training',
                         default=10)
     parser.add_argument('-s', '--bs_v', type=float, help='minibatch size for value NN training',
-                        default=128)
+                        default=256)
     parser.add_argument('-r', '--lr_v', type=float, help='learning rate for value NN training',
                         default=2.5 * 10**(-4))
 

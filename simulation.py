@@ -4,8 +4,8 @@ from actor_utils import Policy
 import os
 import random
 
-MAX_ACTORS = 4  # max number of parallel simulations, change based on number of cores
-ray.init()
+MAX_ACTORS = 2  # max number of parallel simulations, change based on number of cores
+ray.init(log_to_driver=False)
 
 def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episodes, time_steps):
     """
@@ -65,7 +65,7 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
         accum_res.extend(ray.get([simulators[i].run_episode.remote(network, scaler, time_steps,
                                                                    initial_states_set[actors_per_run * MAX_ACTORS + i])
                                   for i in range(remainder)]))
-    print('simulation is done')
+
 
     for i in range(len(accum_res)):
         trajectories.append(accum_res[i][0])
@@ -74,6 +74,7 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
     #################################################
 
     average_reward = np.mean([t['rewards'] for t in trajectories])
+    no_opt_actions = np.mean([t['no_opt_actions'] for t in trajectories])
 
     #### normalization of the states in data ####################
     unscaled = np.concatenate([t['unscaled_obs'][:-burn] for t in trajectories])
@@ -85,9 +86,10 @@ def run_policy(network, policy, scaler, logger, gamma, policy_iter_num, no_episo
     scaler.update_initial(np.hstack((unscaled, np.zeros(len(unscaled))[np.newaxis].T)))
 
     ########## results report ##########################
-    print('Average cost: ', -average_reward)
+    #print('Average cost: ', -average_reward, 'Percent of optimal actions:', no_opt_actions)
 
     logger.log({'_AverageReward': -average_reward,
+                '_No_optimal_actions': no_opt_actions,
                 'Steps': total_steps
                 })
     ####################################################
